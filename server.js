@@ -466,14 +466,13 @@ app.get("/api/status", (_req, res) => {
   });
 });
 
+
 app.post("/api/chat", async (req, res) => {
   const message = req.body?.message;
   const history = req.body?.history;
 
   if (typeof message !== "string" || !message.trim()) {
-    return res.status(400).json({
-      error: "Please enter a message."
-    });
+    return res.status(400).json({ error: "Please enter a message." });
   }
 
   if (message.length > MAX_MESSAGE_LENGTH) {
@@ -506,21 +505,17 @@ app.post("/api/chat", async (req, res) => {
         }))
     : [];
 
-  // Gemini requires alternating user/model messages.
-  // Merge adjacent messages with the same role.
   const contents = [];
-  const addMessage = (role, text) => {
+
+  function addMessage(role, text) {
     const previous = contents[contents.length - 1];
 
     if (previous && previous.role === role) {
       previous.parts[0].text += "\n\n" + text;
     } else {
-      contents.push({
-        role,
-        parts: [{ text }]
-      });
+      contents.push({ role, parts: [{ text }] });
     }
-  };
+  }
 
   for (const item of safeHistory) {
     addMessage(
@@ -531,7 +526,6 @@ app.post("/api/chat", async (req, res) => {
 
   addMessage("user", trimmedMessage);
 
-  // Gemini conversation contents should begin with a user message.
   while (contents.length && contents[0].role !== "user") {
     contents.shift();
   }
@@ -551,15 +545,38 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
   const controller = new AbortController();
   let completed = false;
   let clientDisconnected = false;
+  let timedOut = false;
+  let idleTimer;
+  let totalTimer;
 
-  const timeout = setTimeout(() => {
+  function stopForTimeout(reason) {
+    if (completed || controller.signal.aborted) return;
+
+    timedOut = true;
+    console.error(`Gemini timeout: ${reason}`);
     controller.abort();
-  }, REQUEST_TIMEOUT);
+  }
+
+  function resetIdleTimer() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      stopForTimeout("No response data for 45 seconds");
+    }, 45000);
+  }
+
+  totalTimer = setTimeout(() => {
+    stopForTimeout("Total request exceeded 120 seconds");
+  }, 120000);
+
+  resetIdleTimer();
 
   res.on("close", () => {
     if (!completed && !res.writableEnded) {
       clientDisconnected = true;
+      clearTimeout(idleTimer);
+      clearTimeout(totalTimer);
       controller.abort();
+      console.log("Client disconnected; Gemini request cancelled.");
     }
   });
 
@@ -588,7 +605,7 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
         contents,
         generationConfig: {
           temperature: 0.15,
-          maxOutputTokens: 8192
+          maxOutputTokens: 4096
         }
       })
     });
@@ -596,7 +613,6 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
     if (!response.ok || !response.body) {
       const details = await response.text().catch(() => "");
 
-      // Do not log the API key.
       console.error(
         "Gemini API HTTP error:",
         response.status,
@@ -623,11 +639,10 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
       });
     }
 
+    console.log("Gemini HTTP response:", response.status);
+
     res.status(200);
-    res.setHeader(
-      "Content-Type",
-      "application/x-ndjson; charset=utf-8"
-    );
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("X-Accel-Buffering", "no");
 
@@ -636,25 +651,33 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
 
     let buffer = "";
     let eventData = "";
+    let receivedText = false;
 
-    const sendText = text => {
-      if (text && !res.destroyed) {
-        res.write(JSON.stringify({ token: text }) + "\n");
-      }
-    };
+    function sendText(text) {
+      if (!text || res.destroyed || res.writableEnded) return;
 
-    const processEvent = data => {
+      receivedText = true;
+      res.write(JSON.stringify({ token: text }) + "\n");
+    }
+
+    function processEvent(data) {
       if (!data || data === "[DONE]") return;
 
-      const chunk = JSON.parse(data);
+      let chunk;
 
-      if (chunk.error) {
-        throw new Error(
-          chunk.error.message || "Gemini stream returned an error."
-        );
+      try {
+        chunk = JSON.parse(data);
+      } catch (error) {
+        console.error("Invalid Gemini SSE JSON:", error.message);
+        return;
       }
 
-      const parts = chunk.candidates?.[0]?.content?.parts || [];
+      if (chunk.error) {
+        throw new Error(chunk.error.message || "Gemini stream error");
+      }
+
+      const candidate = chunk.candidates?.[0];
+      const parts = candidate?.content?.parts || [];
 
       for (const part of parts) {
         if (typeof part.text === "string") {
@@ -662,30 +685,28 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
         }
       }
 
-      const finishReason = chunk.candidates?.[0]?.finishReason;
-      if (finishReason === "SAFETY") {
-        console.warn("Gemini stopped output due to safety filtering.");
+      if (candidate?.finishReason) {
+        console.log("Gemini finish reason:", candidate.finishReason);
       }
-    };
+    }
 
-    const processLine = line => {
+    function processLine(line) {
       if (line.startsWith("data:")) {
         const value = line.slice(5).trim();
         eventData += (eventData ? "\n" : "") + value;
-        return;
-      }
-
-      if (line.trim() === "" && eventData) {
+      } else if (line.trim() === "" && eventData) {
         const data = eventData;
         eventData = "";
         processEvent(data);
       }
-    };
+    }
 
     while (true) {
       const { value, done } = await reader.read();
+
       if (done) break;
 
+      resetIdleTimer();
       buffer += decoder.decode(value, { stream: true });
 
       const lines = buffer.split("\n");
@@ -702,43 +723,63 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
       processLine(buffer.replace(/\r$/, ""));
     }
 
-    // Process a final SSE event if the stream ended without a blank line.
     if (eventData) {
       processEvent(eventData);
       eventData = "";
     }
 
     completed = true;
+    clearTimeout(idleTimer);
+    clearTimeout(totalTimer);
 
-    if (!res.destroyed) {
+    if (!receivedText) {
+      console.warn("Gemini stream ended without text.");
+      if (!res.destroyed) {
+        res.write(JSON.stringify({
+          error: "Gemini returned an empty response. Please try again."
+        }) + "\n");
+      }
+    }
+
+    if (!res.destroyed && !res.writableEnded) {
       res.write(JSON.stringify({ done: true }) + "\n");
       res.end();
     }
 
-    console.log("Gemini request completed.");
+    console.log("Gemini request completed:", {
+      receivedText
+    });
+
   } catch (error) {
     completed = true;
+    clearTimeout(idleTimer);
+    clearTimeout(totalTimer);
 
     if (clientDisconnected || res.destroyed) return;
 
-    console.error("LuauForge AI generation error:", error.message);
+    console.error("LuauForge AI generation error:", {
+      name: error.name,
+      message: error.message,
+      timedOut
+    });
 
     if (!res.headersSent) {
-      const timedOut = error.name === "AbortError";
-
       res.status(timedOut ? 504 : 503).json({
         error: timedOut
-          ? "Gemini response timed out. Try a shorter request."
+          ? "Gemini took too long to respond. Please try again."
           : "Gemini generation failed. Check Render logs."
       });
-    } else {
+    } else if (!res.destroyed && !res.writableEnded) {
       res.write(JSON.stringify({
-        error: "Generation was interrupted."
+        error: timedOut
+          ? "Gemini response timed out. Please try again."
+          : "Generation was interrupted."
       }) + "\n");
       res.end();
     }
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(idleTimer);
+    clearTimeout(totalTimer);
   }
 });
 
