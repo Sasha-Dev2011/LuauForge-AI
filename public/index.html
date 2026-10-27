@@ -1,1 +1,287 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#090d18">
+
+    <title>LuauForge AI — Roblox Developer Assistant</title>
+
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <a class="brand" href="#" aria-label="LuauForge AI Home">
+            <span class="brand-icon">◆</span>
+            <span>
+                LuauForge <b>AI</b>
+                <small>ROBLOX DEVELOPER AI</small>
+            </span>
+        </a>
+
+        <nav class="nav" aria-label="Main navigation">
+            <button class="nav-item active" data-page="chat" data-i18n="navChat">
+                ⌂ <span>Chat</span>
+            </button>
+
+            <button class="nav-item" data-page="history" data-i18n="navHistory">
+                ◷ <span>History</span>
+            </button>
+
+            <button class="nav-item" data-page="settings" data-i18n="navSettings">
+                ⚙ <span>Settings</span>
+            </button>
+        </nav>
+
+        <div class="side-promo">
+            <div class="promo-avatar">◈</div>
+
+            <h3 data-i18n="promoTitle">Build Amazing Games</h3>
+
+            <p data-i18n="promoDescription">
+                Your assistant in the world of Roblox Studio.
+            </p>
+
+            <span class="tag">POWERED BY AI</span>
+        </div>
+
+        <div class="side-status">
+            <span id="statusDot" class="dot"></span>
+
+            <div>
+                <b id="statusText" data-i18n="checkingAI">Checking AI...</b>
+                <small data-i18n="localServer">Local AI server</small>
+            </div>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header class="topbar">
+            <div class="topbar-heading">
+                <span class="top-label" data-i18n="topLabel">
+                    YOUR DEVELOPMENT STUDIO
+                </span>
+
+                <h2 id="pageTitle" data-i18n="workspace">
+                    AI Workspace
+                </h2>
+            </div>
+
+            <div class="topbar-actions">
+                <label class="language-label" for="languageSelect">
+                    <span aria-hidden="true">🌐</span>
+                    <span class="sr-only" data-i18n="languageLabel">
+                        Language
+                    </span>
+                </label>
+
+                <select
+                    id="languageSelect"
+                    class="language-select"
+                    aria-label="Select language"
+                    title="Select language"
+                >
+                    <option value="en">🇬🇧 English</option>
+                    <option value="uk">🇺🇦 Українська</option>
+                    <option value="ru">🇷🇺 Русский</option>
+                    <option value="pl">🇵🇱 Polski</option>
+                </select>
+
+                <button
+                    id="newChat"
+                    class="new-chat"
+                    type="button"
+                    data-i18n="newChat"
+                >
+                    ＋ New Chat
+                </button>
+            </div>
+        </header>
+
+        <section id="welcome" class="welcome">
+            <div class="hero">
+                <div class="hero-avatar">
+                    <span>R</span>
+                    <i></i>
+                </div>
+
+                <div class="hero-content">
+                    <span class="tag">LUAUFORGE AI 1.0</span>
+
+                    <h1 data-i18n="heroTitle">
+                        Hello, Developer!
+                        <br>
+                        <span>What shall we build today?</span>
+                    </h1>
+
+                    <p data-i18n="heroDescription">
+                        Write code, create mechanics, and turn your ideas
+                        into Roblox games.
+                    </p>
+                </div>
+            </div>
+
+            <div class="feature-grid">
+                <button
+                    class="feature"
+                    type="button"
+                    data-prompt="Create a server-side leaderstats coins system for Roblox."
+                >
+                    <span class="feature-icon blue">⌘</span>
+                    <b data-i18n="featureCode">Luau Code</b>
+                    <small data-i18n="featureCodeDescription">
+                        Create scripts
+                    </small>
+                </button>
+
+                <button
+                    class="feature"
+                    type="button"
+                    data-prompt="Teach me how to create a beautiful animated GUI in Roblox Studio."
+                >
+                    <span class="feature-icon purple">✦</span>
+                    <b data-i18n="featureGUI">GUI & Design</b>
+                    <small data-i18n="featureGUIDescription">
+                        Interfaces and animations
+                    </small>
+                </button>
+
+                <button
+                    class="feature"
+                    type="button"
+                    data-prompt="Help me find and fix this Roblox Luau error."
+                >
+                    <span class="feature-icon green">⚒</span>
+                    <b data-i18n="featureFix">Debugging</b>
+                    <small data-i18n="featureFixDescription">
+                        Find the error
+                    </small>
+                </button>
+
+                <button
+                    class="feature"
+                    type="button"
+                    data-prompt="Suggest an original Roblox game idea with a progression system."
+                >
+                    <span class="feature-icon orange">★</span>
+                    <b data-i18n="featureIdeas">Game Ideas</b>
+                    <small data-i18n="featureIdeasDescription">
+                        Create something unique
+                    </small>
+                </button>
+            </div>
+
+            <h3 class="section-title" data-i18n="popularPrompts">
+                POPULAR PROMPTS
+            </h3>
+
+            <div class="quick-prompts">
+                <button
+                    type="button"
+                    data-prompt="Create a shop system with server-side purchase validation."
+                    data-i18n="promptShop"
+                >
+                    🛒 Shop System
+                </button>
+
+                <button
+                    type="button"
+                    data-prompt="Create a player data saving system using DataStoreService."
+                    data-i18n="promptSaving"
+                >
+                    💾 Data Saving
+                </button>
+
+                <button
+                    type="button"
+                    data-prompt="Explain how RemoteEvents work in Roblox."
+                    data-i18n="promptRemotes"
+                >
+                    ⚡ RemoteEvents
+                </button>
+            </div>
+        </section>
+
+        <section
+            id="messages"
+            class="messages"
+            aria-live="polite"
+            aria-label="Chat messages"
+        ></section>
+
+        <section id="historyPanel" class="settings-panel hidden">
+            <h2 data-i18n="historyTitle">Chat History</h2>
+            <p data-i18n="historyDescription">
+                Your previous conversations will appear here.
+            </p>
+            <div id="historyList"></div>
+        </section>
+
+        <section id="settingsPanel" class="settings-panel hidden">
+            <h2 data-i18n="settingsTitle">Settings</h2>
+
+            <p>
+                <span data-i18n="interfaceVersion">Interface version:</span>
+                <b>1.0</b>
+            </p>
+
+            <p>
+                <span data-i18n="aiModel">AI model:</span>
+                <b>qwen2.5-coder:3b</b>
+            </p>
+
+            <p data-i18n="localAIInfo">
+                AI runs locally through Ollama on your computer.
+            </p>
+
+            <div class="settings-language">
+                <label for="languageSelect" data-i18n="languageLabel">
+                    Language
+                </label>
+                <p data-i18n="languageDescription">
+                    Choose the language used throughout the interface.
+                </p>
+            </div>
+        </section>
+
+        <section class="composer-area">
+            <form id="chatForm" class="composer">
+                <textarea
+                    id="messageInput"
+                    rows="1"
+                    placeholder="Ask about Roblox Studio or Luau..."
+                    maxlength="12000"
+                    aria-label="Message"
+                    data-i18n-placeholder="messagePlaceholder"
+                ></textarea>
+
+                <div class="composer-bottom">
+                    <span
+                        class="composer-hint"
+                        data-i18n="composerHint"
+                    >
+                        ↵ Enter to send · Shift + Enter for a new line
+                    </span>
+
+                    <button
+                        id="sendButton"
+                        type="submit"
+                        aria-label="Send message"
+                        title="Send message"
+                    >
+                        ➤
+                    </button>
+                </div>
+            </form>
+
+            <p class="disclaimer" data-i18n="disclaimer">
+                LuauForge AI can make mistakes. Check your code before publishing.
+            </p>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
