@@ -1,13 +1,11 @@
-from pathlib import Path
-
-code = r'''const express = require("express");
+const express = require("express");
 const path = require("path");
 const fs = require("fs");
 
 const app = express();
 
 const PORT = Number(process.env.PORT || 3000);
-const HOST = "127.0.0.1";
+const HOST = "0.0.0.0";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://127.0.0.1:11434";
 const MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:3b";
 const VERSION = "3.1.0";
@@ -630,16 +628,11 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
 
 app.listen(PORT, HOST, () => {
   console.log("======================================");
-  console.log(` LuauForge AI v${VERSION}`);
-  console.log(` http://localhost:${PORT}`);
-  console.log(` Model: ${MODEL}`);
-  console.log(` Knowledge documents: ${ALL_KNOWLEDGE.length}`);
-  console.log(" Strict task scope: enabled");
-  console.log(" Streaming: enabled");
+  console.log(`LuauForge AI v${VERSION}`);
+  console.log(`Server listening on ${HOST}:${PORT}`);
+  console.log(`Model: ${MODEL}`);
+  console.log(`Knowledge documents: ${ALL_KNOWLEDGE.length}`);
+  console.log("Strict task scope: enabled");
+  console.log("Streaming: enabled");
   console.log("======================================");
 });
-'''
-
-out = Path("/mnt/data/server.js")
-out.write_text(code, encoding="utf-8")
-print(f"Created {out} ({len(code)} characters, {len(code.splitlines())} lines)")
