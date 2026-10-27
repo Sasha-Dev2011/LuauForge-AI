@@ -447,6 +447,7 @@ function detectLanguage(message) {
 }
 
 
+
 app.get("/api/status", (_req, res) => {
   const configured = Boolean(GEMINI_API_KEY);
 
@@ -456,6 +457,7 @@ app.get("/api/status", (_req, res) => {
     online: configured,
     modelReady: configured,
     model: MODEL,
+    provider: "Google Gemini",
     knowledgeDocuments: ALL_KNOWLEDGE.length,
     externalKnowledgeDocuments: EXTERNAL_KNOWLEDGE.length,
     message: configured
@@ -482,7 +484,7 @@ app.post("/api/chat", async (req, res) => {
 
   if (!GEMINI_API_KEY) {
     return res.status(503).json({
-      error: "Gemini API key is missing. Add GEMINI_API_KEY in Render Environment."
+      error: "GEMINI_API_KEY is missing in Render Environment."
     });
   }
 
@@ -504,6 +506,36 @@ app.post("/api/chat", async (req, res) => {
         }))
     : [];
 
+  // Gemini requires alternating user/model messages.
+  // Merge adjacent messages with the same role.
+  const contents = [];
+  const addMessage = (role, text) => {
+    const previous = contents[contents.length - 1];
+
+    if (previous && previous.role === role) {
+      previous.parts[0].text += "\n\n" + text;
+    } else {
+      contents.push({
+        role,
+        parts: [{ text }]
+      });
+    }
+  };
+
+  for (const item of safeHistory) {
+    addMessage(
+      item.role === "assistant" ? "model" : "user",
+      item.content
+    );
+  }
+
+  addMessage("user", trimmedMessage);
+
+  // Gemini conversation contents should begin with a user message.
+  while (contents.length && contents[0].role !== "user") {
+    contents.shift();
+  }
+
   const systemInstruction = `${SYSTEM_PROMPT}
 
 CURRENT RESPONSE LANGUAGE: ${language}
@@ -516,25 +548,13 @@ Use only relevant facts; do not invent Roblox APIs.
 
 ${knowledge || "No matching local reference found. Use known Roblox/Luau behavior."}`;
 
-  const contents = [
-    ...safeHistory.map(item => ({
-      role: item.role === "assistant" ? "model" : "user",
-      parts: [{ text: item.content }]
-    })),
-    {
-      role: "user",
-      parts: [{ text: trimmedMessage }]
-    }
-  ];
-
   const controller = new AbortController();
   let completed = false;
   let clientDisconnected = false;
 
-  const timeout = setTimeout(
-    () => controller.abort(),
-    REQUEST_TIMEOUT
-  );
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, REQUEST_TIMEOUT);
 
   res.on("close", () => {
     if (!completed && !res.writableEnded) {
@@ -545,8 +565,14 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
 
   try {
     const endpoint =
-      `https://generativelanguage.googleapis.com/v1beta/models/` +
+      "https://generativelanguage.googleapis.com/v1beta/models/" +
       `${encodeURIComponent(MODEL)}:streamGenerateContent?alt=sse`;
+
+    console.log("Gemini request started:", {
+      model: MODEL,
+      messageLength: trimmedMessage.length,
+      historyMessages: safeHistory.length
+    });
 
     const response = await fetch(endpoint, {
       method: "POST",
@@ -569,29 +595,32 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
 
     if (!response.ok || !response.body) {
       const details = await response.text().catch(() => "");
+
+      // Do not log the API key.
       console.error(
-        "Gemini API error:",
+        "Gemini API HTTP error:",
         response.status,
-        details.slice(0, 1500)
+        details.slice(0, 2000)
       );
 
       completed = true;
 
-      if (!res.headersSent) {
-        let errorMessage = "Gemini request failed. Check Render logs.";
+      const messages = {
+        400: "Gemini rejected the request. Check the request format.",
+        401: "Gemini authentication failed. Check the API key.",
+        403: "Gemini access denied. Check API key permissions.",
+        404: "Gemini model was not found. Check GEMINI_MODEL.",
+        429: "Gemini quota or rate limit reached. Check your free-tier limits.",
+        500: "Gemini server error. Try again later.",
+        503: "Gemini is temporarily unavailable. Try again later."
+      };
 
-        if (response.status === 400) {
-          errorMessage = "Gemini rejected the request. Check the model and request format.";
-        } else if (response.status === 401 || response.status === 403) {
-          errorMessage = "Gemini API key invalid or access denied. Check Google AI Studio.";
-        } else if (response.status === 429) {
-          errorMessage = "Gemini quota or rate limit reached. Try again later.";
-        }
-
-        return res.status(503).json({ error: errorMessage });
-      }
-
-      return res.end();
+      return res.status(503).json({
+        error: messages[response.status] ||
+          "Gemini request failed. Check Render logs.",
+        provider: "Google Gemini",
+        upstreamStatus: response.status
+      });
     }
 
     res.status(200);
@@ -614,32 +643,42 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
       }
     };
 
-    const processSSELine = line => {
+    const processEvent = data => {
+      if (!data || data === "[DONE]") return;
+
+      const chunk = JSON.parse(data);
+
+      if (chunk.error) {
+        throw new Error(
+          chunk.error.message || "Gemini stream returned an error."
+        );
+      }
+
+      const parts = chunk.candidates?.[0]?.content?.parts || [];
+
+      for (const part of parts) {
+        if (typeof part.text === "string") {
+          sendText(part.text);
+        }
+      }
+
+      const finishReason = chunk.candidates?.[0]?.finishReason;
+      if (finishReason === "SAFETY") {
+        console.warn("Gemini stopped output due to safety filtering.");
+      }
+    };
+
+    const processLine = line => {
       if (line.startsWith("data:")) {
-        eventData += line.slice(5).trim();
+        const value = line.slice(5).trim();
+        eventData += (eventData ? "\n" : "") + value;
         return;
       }
 
       if (line.trim() === "" && eventData) {
         const data = eventData;
         eventData = "";
-
-        if (data === "[DONE]") return;
-
-        const chunk = JSON.parse(data);
-        const parts = chunk.candidates?.[0]?.content?.parts || "";
-
-        if (Array.isArray(parts)) {
-          for (const part of parts) {
-            if (typeof part.text === "string") {
-              sendText(part.text);
-            }
-          }
-        }
-
-        if (chunk.error) {
-          throw new Error(chunk.error.message || "Gemini stream error");
-        }
+        processEvent(data);
       }
     };
 
@@ -648,34 +687,25 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
+
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        processSSELine(line.replace(/\r$/, ""));
+        processLine(line.replace(/\r$/, ""));
       }
     }
 
     buffer += decoder.decode();
 
-    if (buffer.trim()) {
-      processSSELine(buffer.replace(/\r$/, ""));
+    if (buffer) {
+      processLine(buffer.replace(/\r$/, ""));
     }
 
+    // Process a final SSE event if the stream ended without a blank line.
     if (eventData) {
-      const data = eventData;
+      processEvent(eventData);
       eventData = "";
-
-      if (data !== "[DONE]") {
-        const chunk = JSON.parse(data);
-        const parts = chunk.candidates?.[0]?.content?.parts || [];
-
-        for (const part of parts) {
-          if (typeof part.text === "string") {
-            sendText(part.text);
-          }
-        }
-      }
     }
 
     completed = true;
@@ -684,12 +714,14 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
       res.write(JSON.stringify({ done: true }) + "\n");
       res.end();
     }
+
+    console.log("Gemini request completed.");
   } catch (error) {
     completed = true;
 
     if (clientDisconnected || res.destroyed) return;
 
-    console.error("LuauForge AI error:", error.message);
+    console.error("LuauForge AI generation error:", error.message);
 
     if (!res.headersSent) {
       const timedOut = error.name === "AbortError";
@@ -700,11 +732,10 @@ ${knowledge || "No matching local reference found. Use known Roblox/Luau behavio
           : "Gemini generation failed. Check Render logs."
       });
     } else {
-      res.end(
-        JSON.stringify({
-          error: "Generation was interrupted."
-        }) + "\n"
-      );
+      res.write(JSON.stringify({
+        error: "Generation was interrupted."
+      }) + "\n");
+      res.end();
     }
   } finally {
     clearTimeout(timeout);
@@ -715,10 +746,9 @@ app.listen(PORT, HOST, () => {
   console.log("======================================");
   console.log(`LuauForge AI v${VERSION}`);
   console.log(`Server listening on ${HOST}:${PORT}`);
-  console.log(`Provider: Google Gemini`);
+  console.log("Provider: Google Gemini");
   console.log(`Model: ${MODEL}`);
   console.log(`Knowledge documents: ${ALL_KNOWLEDGE.length}`);
-  console.log("Strict task scope: enabled");
   console.log("Streaming: enabled");
   console.log("======================================");
 });
